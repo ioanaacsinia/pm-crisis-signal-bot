@@ -2,7 +2,7 @@
 """
 PM Crisis Signal Bot — Daily news digest for Ioana
 Runs at 8:00 AM Europe/Madrid via APScheduler
-Makes two separate API calls, sends two Telegram messages of 3 stories each
+Two Telegram messages of 3 stories each
 """
 
 import os
@@ -29,6 +29,8 @@ PORT               = int(os.environ.get("PORT", 8080))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+TELEGRAM_MAX_CHARS = 3800  # Telegram limit is 4096, leaving buffer
+
 
 # ── Minimal web server (keeps Render happy) ──────────────────────────────────
 class HealthHandler(BaseHTTPRequestHandler):
@@ -46,37 +48,37 @@ def start_web_server():
 
 # ── Claude API call ──────────────────────────────────────────────────────────
 async def fetch_batch(batch_num: int, date_short: str, today: str) -> str:
-    batch_note = "Find stories different from any you already found — this is batch 2 of 2." if batch_num == 2 else ""
-    footer = "End with: Tap any angle to use it today." if batch_num == 2 else ""
+    batch_note = "Find 3 different stories from batch 1." if batch_num == 2 else ""
 
-    prompt = f"""You are a research assistant for a Principal Product Manager working on AI and data platforms in enterprise software. She creates LinkedIn and video content about data, AI, and product strategy.
+    prompt = f"""You are a research assistant for a Principal Product Manager specialising in AI, data platforms, and enterprise software. She creates LinkedIn and video content.
 
-Today is {today}. Search the web for 3 strong, specific news stories from today across these angles:
-1. Real-world cases where data predicted (or could have predicted) a crisis an industry ignored — biological cycles, supply chain signals, environmental patterns, demographic waves, systemic blind spots
-2. AI product management strategy — how companies are building or failing with AI products
-3. Enterprise software and ERP transformation
-4. Unexpected or contrarian data applications in non-tech industries
+Today is {today}. Search the web for 3 news stories. {batch_note}
 
-{batch_note}
+Angles to cover:
+- Data that predicted a crisis an industry ignored (biological, supply chain, environmental, demographic)
+- AI product strategy wins or failures
+- Enterprise/ERP transformation
+- Contrarian data use in non-tech industries
 
-Write exactly 3 stories using this format:
+STRICT FORMAT — follow exactly, keep each section short:
 
 PM Crisis Signal - {date_short} ({batch_num}/2)
 
-[emoji] [Title - sharp and specific, max 8 words]
-[Source name] - [full URL]
-
-[2-3 sentences on what happened. Name companies, countries, numbers. Write like a smart journalist, not a press release.]
-
-[2 sentences on the data or AI angle. What was the blind spot? What does this reveal about how industries use or ignore data?]
-
-Content angle: [One specific hook for a LinkedIn post or short video.]
+[emoji] [Title, max 7 words]
+[Source] - [URL]
+What: [2 sentences max. Specific facts, names, numbers.]
+Data angle: [2 sentences max. The blind spot or insight.]
+Content hook: [1 sentence. Specific LinkedIn or video angle.]
 
 ----------
 
-{footer}
+[next story same format]
 
-Plain text only. No markdown. No asterisks. No backticks. Sharp, analytical tone."""
+----------
+
+[next story same format]
+
+CRITICAL: Total response must be under 3500 characters. Be concise. Plain text only, no markdown."""
 
     headers = {
         "Content-Type": "application/json",
@@ -87,7 +89,7 @@ Plain text only. No markdown. No asterisks. No backticks. Sharp, analytical tone
 
     body = {
         "model": "claude-sonnet-4-20250514",
-        "max_tokens": 2000,
+        "max_tokens": 1500,
         "tools": [{"type": "web_search_20250305", "name": "web_search"}],
         "messages": [{"role": "user", "content": prompt}]
     }
@@ -102,7 +104,13 @@ Plain text only. No markdown. No asterisks. No backticks. Sharp, analytical tone
         data = response.json()
 
     text_blocks = [b["text"] for b in data["content"] if b["type"] == "text"]
-    return "\n".join(text_blocks).strip()
+    result = "\n".join(text_blocks).strip()
+
+    # Hard truncate as safety net, never exceeds Telegram limit
+    if len(result) > TELEGRAM_MAX_CHARS:
+        result = result[:TELEGRAM_MAX_CHARS] + "\n[truncated]"
+
+    return result
 
 
 # ── Telegram sender ──────────────────────────────────────────────────────────
@@ -118,6 +126,7 @@ async def send_daily_digest():
 
         log.info("Fetching batch 1...")
         batch1 = await fetch_batch(1, date_short, today)
+        log.info(f"Batch 1 length: {len(batch1)} chars")
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=batch1)
         log.info("Batch 1 sent.")
 
@@ -125,6 +134,7 @@ async def send_daily_digest():
 
         log.info("Fetching batch 2...")
         batch2 = await fetch_batch(2, date_short, today)
+        log.info(f"Batch 2 length: {len(batch2)} chars")
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=batch2)
         log.info("Batch 2 sent. All done.")
 
@@ -134,7 +144,7 @@ async def send_daily_digest():
             bot = Bot(token=TELEGRAM_BOT_TOKEN)
             await bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
-                text=f"PM Signal bot failed today: {str(e)[:300]}"
+                text=f"PM Signal bot failed: {str(e)[:300]}"
             )
         except Exception:
             pass
