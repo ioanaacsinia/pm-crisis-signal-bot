@@ -38,7 +38,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]   # From @BotFather
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]     # From @userinfobot
 ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]    # From console.anthropic.com
 TIMEZONE           = "Europe/Madrid"
-SEND_HOUR          = 9
+SEND_HOUR          = 8
 SEND_MINUTE        = 0
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -49,33 +49,33 @@ log = logging.getLogger(__name__)
 async def fetch_pm_signals() -> str:
     today = datetime.now(pytz.timezone(TIMEZONE)).strftime("%A, %d %B %Y")
 
-    prompt = f"""Search today's news for stories relevant to a Principal Product Manager 
-working on AI and data platforms in enterprise software.
+    prompt = f"""You are a research assistant for a Principal Product Manager working on AI and data platforms in enterprise software. She creates LinkedIn and video content about data, AI, and product strategy.
 
-Today is {today}.
+Today is {today}. Search the web for today's most relevant news stories.
 
 Focus on these angles:
-1. Real-world cases where publicly available data predicted (or could have predicted) a crisis, 
-   failure, or disruption that an industry ignored — biological cycles, supply chain signals, 
-   environmental patterns, demographic waves
-2. AI product management strategy shifts
+1. Real-world cases where publicly available data predicted (or could have predicted) a crisis, failure, or disruption that an industry ignored — biological cycles, supply chain signals, environmental patterns, demographic waves, systemic blind spots
+2. AI product management strategy shifts — how companies are building or failing with AI products
 3. Enterprise software and ERP transformation
-4. Unexpected or contrarian data applications in non-tech industries
+4. Unexpected or contrarian applications of data in non-tech industries
 
-Return exactly 5 story ideas formatted for Telegram Markdown. Use this exact structure:
+Return exactly 4 stories. For each one, write in this format:
 
-🧠 *PM Signal — {datetime.now(pytz.timezone(TIMEZONE)).strftime("%-d %b")}*
+[emoji] *[Title — sharp and specific, max 8 words]*
+[Source name] — [full URL to the article]
 
-For each of the 5 ideas:
-[relevant emoji] *[Short punchy title — max 8 words]*
-[2 sentences: what happened and what the data/AI angle is]
-💡 _Content angle: [one sentence on how to turn this into a LinkedIn post or short video]_
+[A proper paragraph of 3-4 sentences summarising what actually happened. Be specific — name the companies, countries, numbers, people involved. Write it like a smart journalist, not a press release.]
 
-End with:
-—
-_Tap any angle to use it today\\._
+[A second paragraph connecting this story to a data or AI insight. Explain what the data angle is, why it was missed or ignored, what system or incentive caused the blind spot, or what this reveals about how industries use (or fail to use) data. This is the analytical layer — make it interesting and non-obvious.]
 
-Use Telegram MarkdownV2 escaping rules. Keep the tone sharp and analytical — not hype."""
+💡 Content angle: [One sentence on how to turn this into a LinkedIn post or short video. Be specific about the angle or hook, not generic.]
+
+---
+
+Separate each story with a blank line and a divider (———).
+End the message with: _4 signals for {datetime.now(pytz.timezone(TIMEZONE)).strftime("%-d %b")}. Tap any to go deeper._
+
+Write in plain Telegram Markdown (bold with *, italic with _). Do not use MarkdownV2. Keep tone sharp, analytical, and human — never hype."""
 
     headers = {
         "Content-Type": "application/json",
