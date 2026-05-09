@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-PM Signal Bot — Daily news digest for Ioana
+PM Crisis Signal Bot — Daily news digest for Ioana
 Runs at 9:00 AM Europe/Madrid via APScheduler
 Searches news with Claude API, sends to Telegram
+Includes minimal HTTP server to satisfy Render's port requirement
 """
 
 import os
 import asyncio
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 import httpx
 from telegram import Bot
@@ -16,7 +19,21 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
-# ── Config (set these as environment variables in Railway) ──────────────────
+PORT = int(os.environ.get("PORT", 8080))
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"PM Crisis Signal Bot is running.")
+    def log_message(self, format, *args):
+        pass
+
+def start_web_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    server.serve_forever()
+
+# ── Config ───────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]   # From @BotFather
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]     # From @userinfobot
 ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]    # From console.anthropic.com
@@ -116,7 +133,10 @@ async def send_daily_digest():
 
 # ── Scheduler ───────────────────────────────────────────────────────────────
 async def main():
-    log.info(f"PM Signal Bot starting — will send at {SEND_HOUR:02d}:{SEND_MINUTE:02d} {TIMEZONE}")
+    thread = threading.Thread(target=start_web_server, daemon=True)
+    thread.start()
+    log.info(f"Web server started on port {PORT}")
+    log.info(f"PM Crisis Signal Bot starting — will send at {SEND_HOUR:02d}:{SEND_MINUTE:02d} {TIMEZONE}")
 
     scheduler = AsyncIOScheduler(timezone=pytz.timezone(TIMEZONE))
     scheduler.add_job(
