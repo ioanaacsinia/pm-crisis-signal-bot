@@ -2,11 +2,10 @@
 """
 PM Crisis Signal Bot — Daily news digest for Ioana
 Runs at 8:00 AM Europe/Madrid via APScheduler
-Sends two Telegram messages of 3 stories each
+Makes two separate API calls, sends two Telegram messages of 3 stories each
 """
 
 import os
-import json
 import asyncio
 import logging
 import threading
@@ -14,7 +13,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 import httpx
 from telegram import Bot
-from telegram.constants import ParseMode
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -47,41 +45,38 @@ def start_web_server():
 
 
 # ── Claude API call ──────────────────────────────────────────────────────────
-async def fetch_pm_signals() -> tuple:
-    tz = pytz.timezone(TIMEZONE)
-    now = datetime.now(tz)
-    today = now.strftime("%A, %d %B %Y")
-    date_short = now.strftime("%-d %b")
+async def fetch_batch(batch_num: int, date_short: str, today: str) -> str:
+    batch_note = "Find stories different from any you already found — this is batch 2 of 2." if batch_num == 2 else ""
+    footer = "End with: Tap any angle to use it today." if batch_num == 2 else ""
 
     prompt = f"""You are a research assistant for a Principal Product Manager working on AI and data platforms in enterprise software. She creates LinkedIn and video content about data, AI, and product strategy.
 
-Today is {today}. Search the web for today's most relevant news stories across these angles:
+Today is {today}. Search the web for 3 strong, specific news stories from today across these angles:
 1. Real-world cases where data predicted (or could have predicted) a crisis an industry ignored — biological cycles, supply chain signals, environmental patterns, demographic waves, systemic blind spots
 2. AI product management strategy — how companies are building or failing with AI products
 3. Enterprise software and ERP transformation
 4. Unexpected or contrarian data applications in non-tech industries
 
-Find 6 strong, specific stories from today's news. Write each story in this format:
+{batch_note}
 
-[emoji] *[Title — sharp and specific, max 8 words]*
-[Source name] — [full URL]
+Write exactly 3 stories using this format:
 
-[2-3 sentences on what happened. Name companies, countries, numbers. Write like a smart journalist.]
+PM Crisis Signal - {date_short} ({batch_num}/2)
+
+[emoji] [Title - sharp and specific, max 8 words]
+[Source name] - [full URL]
+
+[2-3 sentences on what happened. Name companies, countries, numbers. Write like a smart journalist, not a press release.]
 
 [2 sentences on the data or AI angle. What was the blind spot? What does this reveal about how industries use or ignore data?]
 
 Content angle: [One specific hook for a LinkedIn post or short video.]
 
-Separate stories with: ———
+----------
 
-Now return your response as a JSON object with exactly this structure (raw JSON only, no markdown fences, no explanation):
-{{"batch1": "header + stories 1-3", "batch2": "header + stories 4-6 + footer"}}
+{footer}
 
-For batch1, start with: PM Crisis Signal - {date_short} (1/2)
-For batch2, start with: PM Crisis Signal - {date_short} (2/2)
-End batch2 with: Tap any angle to use it today.
-
-Write in plain text only — no asterisks, no underscores, no Markdown formatting at all. Keep tone sharp, analytical, human — never hype."""
+Plain text only. No markdown. No asterisks. No backticks. Sharp, analytical tone."""
 
     headers = {
         "Content-Type": "application/json",
@@ -92,7 +87,7 @@ Write in plain text only — no asterisks, no underscores, no Markdown formattin
 
     body = {
         "model": "claude-sonnet-4-20250514",
-        "max_tokens": 4000,
+        "max_tokens": 2000,
         "tools": [{"type": "web_search_20250305", "name": "web_search"}],
         "messages": [{"role": "user", "content": prompt}]
     }
@@ -107,25 +102,32 @@ Write in plain text only — no asterisks, no underscores, no Markdown formattin
         data = response.json()
 
     text_blocks = [b["text"] for b in data["content"] if b["type"] == "text"]
-    raw = "\n".join(text_blocks).strip()
-
-    # Strip accidental markdown fences
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
-    parsed = json.loads(raw)
-    return parsed["batch1"], parsed["batch2"]
+    return "\n".join(text_blocks).strip()
 
 
 # ── Telegram sender ──────────────────────────────────────────────────────────
 async def send_daily_digest():
     log.info("Fetching PM signals...")
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    today = now.strftime("%A, %d %B %Y")
+    date_short = now.strftime("%-d %b")
+
     try:
-        batch1, batch2 = await fetch_pm_signals()
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+        log.info("Fetching batch 1...")
+        batch1 = await fetch_batch(1, date_short, today)
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=batch1)
-        await asyncio.sleep(2)
+        log.info("Batch 1 sent.")
+
+        await asyncio.sleep(3)
+
+        log.info("Fetching batch 2...")
+        batch2 = await fetch_batch(2, date_short, today)
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=batch2)
-        log.info("Both messages sent successfully.")
+        log.info("Batch 2 sent. All done.")
+
     except Exception as e:
         log.error(f"Failed to send digest: {e}")
         try:
@@ -143,7 +145,7 @@ async def main():
     thread = threading.Thread(target=start_web_server, daemon=True)
     thread.start()
     log.info(f"Web server started on port {PORT}")
-    log.info(f"PM Crisis Signal Bot starting — will send at {SEND_HOUR:02d}:{SEND_MINUTE:02d} {TIMEZONE}")
+    log.info(f"PM Crisis Signal Bot starting - will send at {SEND_HOUR:02d}:{SEND_MINUTE:02d} {TIMEZONE}")
 
     scheduler = AsyncIOScheduler(timezone=pytz.timezone(TIMEZONE))
     scheduler.add_job(
