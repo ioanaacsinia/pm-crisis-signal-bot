@@ -54,11 +54,13 @@ async def fetch_batch(batch_num: int, date_short: str, today: str) -> str:
 
 Today is {today}. Search the web for 3 news stories. {batch_note}
 
-Angles to cover:
-- Data that predicted a crisis an industry ignored (biological, supply chain, environmental, demographic)
-- AI product strategy wins or failures
-- Enterprise/ERP transformation
-- Contrarian data use in non-tech industries
+Angles to cover (pick varied ones, max one story per angle):
+- Data that predicted a crisis an industry ignored but didn't act on: biological cycles, climate patterns, demographic waves, epidemics, financial signals, infrastructure failures
+- An industry using data or AI in a way that seems obvious in hindsight but nobody did it before
+- A non-obvious connection between two unrelated industries where one solved a problem the other hasn't noticed yet
+- AI product strategy: a company making a genuinely interesting bet, or a high-profile failure with a real lesson
+- Human behaviour or social patterns that data reveals — something counterintuitive about how people actually act vs how we assume they do
+- Enterprise software or ERP transformation: a real shift in how companies run operations, not a press release
 
 STRICT FORMAT — follow exactly, keep each section short:
 
@@ -113,6 +115,66 @@ CRITICAL: Total response must be under 3500 characters. Be concise. Plain text o
     return result
 
 
+
+# ── Celonis batch ─────────────────────────────────────────────────────────────
+async def fetch_celonis_prep(today: str) -> str:
+    prompt = f"""You are a research assistant helping a senior Product Manager prepare for a job interview at Celonis in Barcelona for a Product Lead role focused on Front Office and Procurement (direct and indirect).
+
+Today is {today}. Search for 3 articles, case studies, or news items — recent or older — that are genuinely useful for this specific interview. Prioritise:
+- Celonis Front Office: their lead-to-cash solution, front office process mining, how they're positioning against CRM-native tools
+- Source-to-Pay and Procurement: maverick spending, three-way match failures, contract leakage, supplier risk, indirect vs direct procurement
+- The gap between front office and back office execution — where ERP data exists but business decisions don't use it
+- Process mining applied to Sales, Customer Service, or Commerce workflows
+- A company (any industry) that used process intelligence or execution management to solve a procurement or revenue operations problem in a non-obvious way
+
+STRICT FORMAT — total response under 3500 characters:
+
+Celonis Prep - {today[:6]}
+
+[emoji] [Title, max 7 words]
+[Source] - [URL]
+What: [2 sentences. Specific and concrete.]
+Interview angle: [1 sentence. How to use this in a Celonis interview for the Front Office/Procurement Product Lead role.]
+
+----------
+
+[next story same format]
+
+----------
+
+[next story same format]
+
+Plain text only. No markdown. Concise."""
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05"
+    }
+
+    body = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1500,
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "messages": [{"role": "user", "content": prompt}]
+    }
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=body
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    text_blocks = [b["text"] for b in data["content"] if b["type"] == "text"]
+    result = "\n".join(text_blocks).strip()
+    if len(result) > TELEGRAM_MAX_CHARS:
+        result = result[:TELEGRAM_MAX_CHARS] + "\n[truncated]"
+    return result
+
 # ── Telegram sender ──────────────────────────────────────────────────────────
 async def send_daily_digest():
     log.info("Fetching PM signals...")
@@ -136,7 +198,15 @@ async def send_daily_digest():
         batch2 = await fetch_batch(2, date_short, today)
         log.info(f"Batch 2 length: {len(batch2)} chars")
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=batch2)
-        log.info("Batch 2 sent. All done.")
+        log.info("Batch 2 sent.")
+
+        await asyncio.sleep(3)
+
+        log.info("Fetching Celonis prep...")
+        celonis = await fetch_celonis_prep(today)
+        log.info(f"Celonis length: {len(celonis)} chars")
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=celonis)
+        log.info("Celonis batch sent. All done.")
 
     except Exception as e:
         log.error(f"Failed to send digest: {e}")
